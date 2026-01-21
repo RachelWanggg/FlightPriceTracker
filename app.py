@@ -1,7 +1,8 @@
 from flask import Flask, render_template, request
 import requests
 
-from keys import SERPAPI_KEY
+import os
+SERPAPI_KEY = os.environ.get("SERPAPI_KEY")
 
 app = Flask(__name__)
 
