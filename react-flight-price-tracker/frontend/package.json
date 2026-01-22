@@ -1,0 +1,26 @@
+{
+  "name": "react-flight-price-tracker",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "backend": "cd backend && export FLASK_APP=app.py && .venv/bin/flask run"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.1.1",
+    "vite": "^7.2.4",
+    "@eslint/js": "^9.39.1",
+    "@types/react": "^18.2.7",
+    "@types/react-dom": "^18.2.4",
+    "eslint": "^9.39.1",
+    "eslint-plugin-react-hooks": "^7.0.1"
+  }
+}
+
