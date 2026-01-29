@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import "./App.css";
 
 function App() {
@@ -20,9 +20,15 @@ function App() {
   ]);
 
   const [flights, setFlights] = useState([]);
-  const [multiCityLegs, setMultiCityLegs] = useState(null);
+  const [returnFlights, setReturnFlights] = useState({});
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  const [selectedFlights, setSelectedFlights] = useState([]);
+  const [currentLeg, setCurrentLeg] = useState(0);
+  const [departureToken, setDepartureToken] = useState(null);
+  const [multiCityLegs, setMultiCityLegs] = useState(null);
+  const [currentFlights, setCurrentFlights] = useState([]);
 
   const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
 
@@ -33,22 +39,128 @@ function App() {
   };
 
   const addSegment = () => setMultiCities([...multiCities, { departure_id: "", arrival_id: "", date: "" }]);
-  
-  const searchFlights = async (e) => {
-    e.preventDefault();
+
+  //----- Search function:
+  const searchFlights = async (payloadOverride = null) => {
     setLoading(true);
     setError(null);
     setFlights([]);
     setMultiCityLegs(null);
+    setCurrentFlights([]);
+    setSelectedFlights([]);
+    setCurrentLeg(0);
 
+    // 2. Prepare payload and make API request
     try {
-      const payload = { ...form };
+      const payload = payloadOverride || { ...form };
 
-      if (form.type === "3") {
+      if (form.type === "3" && !payload.departure_token) {
         payload.multi_city_json = JSON.stringify(multiCities);
       }
+      console.log("SEARCH PAYLOAD:", payload);
 
-      console.log("Sending request with payload:", payload);
+      // 3. Make POST request to backend API
+      const res = await fetch("http://127.0.0.1:5001/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      console.log("API RESPONSE:", data);
+
+      if (!res.ok) throw new Error(data.error || "API error");
+
+      // Handle multi-city vs regular flights
+      if (data.multi_city) {
+        setMultiCityLegs(data.multi_city.legs);
+        setCurrentFlights(data.multi_city.legs[0].flights || []);
+      }
+      else if (data.flights) {
+        setFlights(data.flights || []);
+      }
+      else {
+        setError("No flight data received from server");
+      }
+    } catch (err) {
+      setError(err.message);
+      console.error(err);
+    }
+    setLoading(false);
+  };
+
+
+
+  const handleFlightReturn = async (flight) => {
+    if (!form.return_date) return alert("Set return date first!");
+    const flightKey = flight.flights[0].flight_number;
+
+    setReturnFlights((prev) => ({ ...prev, [flightKey]: "loading" }));
+
+    try {
+      const res = await fetch("http://127.0.0.1:5001/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          origin: form.origin,
+          destination: form.destination,
+          outbound_date: form.outbound_date,
+          return_date: form.return_date,
+          type: "1",
+          currency: form.currency,
+          gl: form.gl,
+          hl: form.hl,
+          departure_token: flight.departure_token,
+          travel_class: form.travel_class,
+          adults: form.adults
+        }),
+      },
+      );
+
+      const data = await res.json();
+      //console.log("RETURN API RESPONSE:", data);
+      if (res.ok && data.flights) {
+        setReturnFlights((prev) => ({ ...prev, [flightKey]: data.flights }));
+      } else {
+        setReturnFlights((prev) => ({ ...prev, [flightKey]: [] }));
+        console.error("Error fetching return flights:", data.error);
+      }
+    } catch (err) {
+      console.error(err);
+      setReturnFlights((prev) => ({ ...prev, [flightKey]: [] }));
+    }
+  };
+
+  // --- Select Flight (for multi-city) ---
+  const handleSelectFlight = async (flight) => {
+    const nextLegIndex = selectedFlights.length;
+    setSelectedFlights((prev) => [...prev, flight]);
+
+    // All legs selected
+    if (nextLegIndex >= multiCities.length - 1) {
+      console.log("All legs selected!");
+      setCurrentFlights([]);
+      return;
+    }
+
+    // Fetch next leg flights
+    const nextLeg = multiCities[nextLegIndex + 1];
+    if (!nextLeg) return;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const payload = {
+        type: "3",
+        multi_city_json: JSON.stringify(multiCities),
+        travel_class: form.travel_class,
+        adults: form.adults,
+        hl: form.hl,
+        gl: form.gl,
+        currency: form.currency,
+      };
+
+      console.log("SEARCH PAYLOAD FOR NEXT LEG:", payload);
 
       const res = await fetch("http://127.0.0.1:5001/search", {
         method: "POST",
@@ -56,46 +168,79 @@ function App() {
         body: JSON.stringify(payload),
       });
 
-      console.log("Response status:", res.status);
-      console.log("Response OK?", res.ok);
-
       const data = await res.json();
-      
       if (!res.ok) throw new Error(data.error || "API error");
-      
-      // Handle multi-city vs regular flights
-      if (data.multi_city) {
-        
-        setMultiCityLegs(data.multi_city.legs);
-        
-      } else if (data.flights) {
-        
-        setFlights(data.flights || []);
-       
-      } else {
-        
-        setError("No flight data received from server");
-      }
-    }catch (err) {
+
+      setCurrentFlights(data.multi_city?.legs?.[nextLegIndex + 1]?.flights || []);
+      setCurrentLeg(nextLegIndex + 1);
+    } catch (err) {
+      console.error(err);
       setError(err.message);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
+
+
+
+
+  // --- Fetch flights for the next multi-city leg whenever departureToken or currentLeg changes ---
+  // useEffect(() => {
+  //   const fetchNextLeg = async () => {
+  //     if (!departureToken || currentLeg >= multiCityLegs.length) return;
+
+  //     setLoading(true);
+  //     setError(null);
+
+  //     const leg = multiCities[currentLeg];
+  //     try {
+  //       const res = await fetch("http://127.0.0.1:5001/search", {
+  //         method: "POST",
+  //         headers: { "Content-Type": "application/json" },
+  //         body: JSON.stringify({
+  //           type: "3",
+  //           origin: leg.departure_id,
+  //           destination: leg.arrival_id,
+  //           date: leg.date,
+  //           departure_token: departureToken,
+  //           travel_class: form.travel_class,
+  //           adults: form.adults,
+  //           hl: form.hl,
+  //           gl: form.gl,
+  //           currency: form.currency
+  //         }),
+  //       });
+
+  //       const data = await res.json();
+  //       console.log(`Leg ${currentLeg + 1} API RESPONSE:`, data);
+
+  //       if (!res.ok) throw new Error(data.error || "API error");
+
+  //       setCurrentFlights(data.multi_city?.legs?.[currentLeg]?.flights || []);
+  //     } catch (err) {
+  //       console.error(err);
+  //       setError(err.message);
+  //     }
+  //     setLoading(false);
+  //   };
+
+  //   fetchNextLeg();
+  // }, [departureToken, currentLeg]);
 
   const formatTime = (timeStr) => {
     if (!timeStr) return "N/A";
     timeStr = String(timeStr).trim();
-    
+
     if (timeStr.includes(" ")) {
       const timePart = timeStr.split(" ")[1];
       return timePart ? timePart.substring(0, 5) : "N/A";
     }
-    
+
     if (timeStr.includes("T")) {
       const timePart = timeStr.split("T")[1];
       return timePart ? timePart.substring(0, 5) : "N/A";
     }
-    
+
     return timeStr.length >= 5 ? timeStr.substring(0, 5) : timeStr;
   };
 
@@ -113,28 +258,27 @@ function App() {
       </header>
 
       <main className="container">
-        {error && <div className="alert error">{error}</div>}
+        {error && <div className="error">{error}</div>}
 
-        <form className="card search-card" onSubmit={searchFlights}>
-          <div className="grid two">
+        <form className="card search-card" onSubmit={(e) => {
+          e.preventDefault();
+          searchFlights();
+        }}>
+          <div className="custom-select">
             <select name="type" value={form.type} onChange={handleChange}>
               <option value="1">Round Trip</option>
               <option value="2">One Way</option>
               <option value="3">Multi-City</option>
             </select>
 
-            <select
-              name="travel_class"
-              value={form.travel_class}
-              onChange={handleChange}
-            >
+            <select name="travel_class" value={form.travel_class} onChange={handleChange}>
               <option value="1">Economy</option>
               <option value="2">Premium</option>
               <option value="3">Business</option>
               <option value="4">First</option>
             </select>
           </div>
-
+          <br />
           {form.type === "3" ? (
             <div className="stack">
               {multiCities.map((seg, i) => (
@@ -166,7 +310,7 @@ function App() {
                 </div>
               ))}
               <button type="button" className="btn ghost" onClick={addSegment}>
-                + Add Segment
+                Add Trip
               </button>
             </div>
           ) : (
@@ -208,55 +352,117 @@ function App() {
         {/* RESULTS */}
         {multiCityLegs && (
           <section className="results">
-            {multiCityLegs.map((leg) => (
-              <div className="card" key={leg.leg_number}>
-                <h3>
-                  Trip {leg.leg_number} · {leg.route}
-                </h3>
-                <p className="muted">{leg.date}</p>
+            <h3>
+              Trip {currentLeg + 1} ·{" "}
+              {multiCityLegs[currentLeg].origin} →
+              {multiCityLegs[currentLeg].destination}
+            </h3>
 
-                {(leg.flights || []).slice(0, 4).map((f, i) => (
-                  <div className="flight-row" key={i}>
-                    <span>${f.price}</span>
-                    <span>
-                      {f.flights[0].departure_airport.id} →
-                      {f.flights[f.flights.length - 1].arrival_airport.id}
-                    </span>
-                    <span>
-                      {f.flights[0].departure_airport.time} →
-                      {f.flights[f.flights.length - 1].arrival_airport.time}
-                    </span>
-                    <span className="muted">
-                      {f.flights.length - 1} stop(s)
-                    </span>
-                    <span className="muted">{f.flights[0].time} </span>
-                  </div>
-                ))}
-              </div>
-            ))}
-          </section>
-        )}
-
-        {flights.length > 0 && (
-          <section className="results">
-            {flights.map((f, i) => (
-              <div className="card" key={i}>
-                <div className="flight-row">
-                  <strong>${f.price}</strong>
+            {currentFlights.slice(0, 4).map((f, i) => (
+              <div className="flight-row" key={i}>
+                <div className="flight-main-info">
+                  <span className="price">${f.price}</span>
                   <span>
                     {f.flights[0].departure_airport.id} →
                     {f.flights[f.flights.length - 1].arrival_airport.id}
                   </span>
                 </div>
+
+                <button
+                  className="btn secondary"
+                  onClick={() => handleSelectFlight(f)}
+                  disabled={returnFlights[f.flights[0].flight_number] === "loading"}
+                >
+                  {returnFlights[f.flights[0].flight_number] === "loading"
+                    ? "Loading…"
+                    : "Select this flight"}
+                </button>
               </div>
             ))}
           </section>
         )}
+
+        {/* ONE-WAY and ROUND-TRIP */}
+        {flights.map((f, i) => {
+          const flightKey = f.flights[0].flight_number;
+
+          return (
+            <div key={i} className="card">
+              {/* Departure flight info */}
+              <div className="flight-row" key={i}>
+                <div className="flight-main-info">
+                  <span className="price">${f.price}</span>
+                  <span>
+                    {f.flights[0].departure_airport.id} →
+                    {f.flights[f.flights.length - 1].arrival_airport.id}
+                  </span>
+                  <span>
+                    {f.flights[0].departure_airport.time} →
+                    {f.flights[f.flights.length - 1].arrival_airport.time}
+                  </span>
+                </div>
+                <div className="flight-sub-info">
+                  <span className="muted">
+                    {f.flights.length - 1} stop(s)
+                  </span>
+                  <span className="muted"><img
+                    src={f.flights[0].airline_logo}
+                    style={{ width: '20px', height: '20px' }} // Optional styling
+                  /> {f.flights[0].airline} {f.flights[0].flight_number}</span>
+                </div>
+              </div>
+
+              {/* Button to fetch return flights */}
+              {/* Show return button only for round-trip */}
+              {form.type === "1" && (
+                <div className="flight-row">
+                  <button
+                    className="btn secondary"
+                    onClick={() => handleFlightReturn(f)}
+                    disabled={returnFlights[f.flights[0].flight_number] === "loading"}
+                  >
+                    {returnFlights[f.flights[0].flight_number] === "loading"
+                      ? "Loading…"
+                      : "Show Return Flights"}
+                  </button>
+                </div>
+              )}
+
+              {/* Show return flights if loaded */}
+              {Array.isArray(returnFlights[flightKey]) &&
+                returnFlights[flightKey].map((rf, j) => (
+                  <div className="flight-row return" key={j}>
+                    <div className="flight-main-info">
+                      <span className="price">${rf.price}</span>
+                      <span>
+                        {rf.flights[0].departure_airport.id} →
+                        {rf.flights[rf.flights.length - 1].arrival_airport.id}
+                      </span>
+                      <span>
+                        {rf.flights[0].departure_airport.time} →
+                        {rf.flights[rf.flights.length - 1].arrival_airport.time}
+                      </span>
+                    </div>
+                    <div className="flight-sub-info">
+                      <span className="muted">
+                        {rf.flights.length - 1} stop(s)
+                      </span>
+                      <span className="muted"><img
+                        src={rf.flights[0].airline_logo}
+                        style={{ width: '20px', height: '20px' }} // Optional styling
+                      /> {rf.flights[0].airline} {rf.flights[0].flight_number}</span>
+                    </div>
+                  </div>
+                ))}
+            </div>
+          );
+        })}
       </main>
 
-      <footer>© 2026 Rachel Wang</footer>
+      <footer>&copy; 2026 Rachel Wang</footer>
     </div>
   );
 }
+
 
 export default App;

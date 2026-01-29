@@ -65,16 +65,19 @@ body {
   gap: 1rem;
 }
 
-input,
-select {
+.custom-select{
+  display: flex;
+  gap: 10px;
+}
+
+input,select {
   padding: 0.75rem;
   border-radius: 10px;
   border: 1px solid #c7d2fe;
   font-size: 0.95rem;
 }
 
-input:focus,
-select:focus {
+input:focus, select:focus{
   outline: none;
   border-color: #6366f1;
   box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
@@ -115,6 +118,12 @@ select:focus {
   color: #4f46e5;
 }
 
+.btn.secondary {
+  background: #e0e7ff;
+  color: #3730a3;
+  margin-top: 1.5rem;
+}
+
 .btn:hover {
   transform: translateY(-1px);
   box-shadow: 0 8px 20px rgba(79, 70, 229, 0.25);
@@ -126,9 +135,23 @@ select:focus {
 
 .flight-row {
   display: flex;
+  flex-direction: column;
+  gap: 4px; /* Space between lines */
+  padding: 10px;
+  border-bottom: 1px solid #6366f1
+}
+
+.flight-main-info{
+  display: flex;
   justify-content: space-between;
   padding: 0.75rem 0;
   border-bottom: 1px solid #e5e7eb;
+}
+
+.flight-sub-info{
+  display: flex;
+  justify-content: space-between;
+  padding: 0.75rem 0;
 }
 
 .flight-row:last-child {
@@ -147,6 +170,7 @@ select:focus {
   color: #991b1b;
   margin-bottom: 1rem;
 }
+
 
 footer {
   text-align: center;
