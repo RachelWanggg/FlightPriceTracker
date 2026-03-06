@@ -125,7 +125,7 @@ Open your browser and navigate to the frontend URL (usually `http://localhost:51
 ## Project Structure
 
 ```
-FlightPriceTracker/react-flight-price-tracker/
+FlightPriceTracker
 ├── backend/
 │   ├── app.py              # Flask backend server
 │   ├── requirements.txt    # Python dependencies
